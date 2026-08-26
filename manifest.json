@@ -1,6 +1,6 @@
 {
   "package_name": "tkr_segmentation_inference",
-  "package_version": "2.1.0",
+  "package_version": "2.1.1",
   "created_date": "2026-08-26",
   "weight_file": "tkr_inference/weights/tkr_seg_validity_gate_b3_256.pt",
   "weight_sha256": "08b8080f7dd14f3a316d6de3e94305d654a63b58bf098abf6a88db3cb06c8572",

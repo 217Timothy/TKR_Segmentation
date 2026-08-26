@@ -49,7 +49,22 @@ python -m pip install -e .
 
 看到 `package verification: PASS` 代表模型位置、模型版本與套件都正確。
 
-## 3. Inference
+## 3. 先跑內附測試圖片
+
+專案內附一張測試圖片：`examples/test_image.png`。模型放好後可直接執行：
+
+```bash
+./run.sh infer \
+  --input examples/test_image.png \
+  --output demo_output \
+  --device cpu
+```
+
+正常情況會顯示 `REJECT_OOD`，並在 `demo_output/` 產生 `result.json`、`mask.png`、`overlay.png`、`masked.png` 與 `summary.json`。這代表完整 inference 流程可以正常執行。
+
+若要重跑，請換一個新的 output 名稱，例如 `demo_output_2`。
+
+## 4. Inference
 
 單張照片：
 
@@ -78,7 +93,7 @@ python -m pip install -e .
 
 每次請使用一個尚未存在的新 output 資料夾，以免蓋掉舊結果。
 
-## 4. 輸出內容
+## 5. 輸出內容
 
 每張圖片會建立一個結果資料夾：
 
