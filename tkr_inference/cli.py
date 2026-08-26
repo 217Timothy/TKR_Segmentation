@@ -30,7 +30,7 @@ def _output_name(path: Path) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="TKR validity gate + wound segmentation + ROI extraction"
+        description="TKR validity gate + wound segmentation inference"
     )
     parser.add_argument("--input", type=Path, required=True,
                         help="an image or a directory (searched recursively)")
@@ -38,7 +38,6 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--device", default="auto",
                         help="auto, cpu, cuda, cuda:0, or mps")
-    parser.add_argument("--roi-padding-pixels", type=int, default=40)
     args = parser.parse_args()
 
     if not args.input.exists():
@@ -54,7 +53,6 @@ def main() -> None:
     pipeline = TKRSegmentationPipeline(
         checkpoint=args.checkpoint,
         device=args.device,
-        roi_padding_pixels=args.roi_padding_pixels,
     )
     args.output.mkdir(parents=True, exist_ok=False)
     summary = []
@@ -65,8 +63,6 @@ def main() -> None:
         cv2.imwrite(str(image_dir / "mask.png"), result.mask * 255)
         cv2.imwrite(str(image_dir / "overlay.png"), result.overlay_bgr)
         cv2.imwrite(str(image_dir / "masked.png"), result.masked_bgr)
-        if result.roi_bgr is not None:
-            cv2.imwrite(str(image_dir / "roi.png"), result.roi_bgr)
         record = {"input": str(path), **result.metadata()}
         (image_dir / "result.json").write_text(
             json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
@@ -78,13 +74,13 @@ def main() -> None:
         )
 
     accepted = sum(item["accepted"] for item in summary)
-    classified = sum(item["should_classify"] for item in summary)
+    mask_non_empty = sum(item["mask_non_empty"] for item in summary)
     report = {
         "input": str(args.input),
         "images": len(summary),
         "accepted": accepted,
         "rejected": len(summary) - accepted,
-        "ready_for_classification": classified,
+        "mask_non_empty": mask_non_empty,
         "device": str(pipeline.device),
         "checkpoint_epoch": pipeline.checkpoint_epoch,
         "ood_threshold": pipeline.ood_threshold,

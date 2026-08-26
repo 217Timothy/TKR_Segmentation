@@ -1,4 +1,4 @@
-"""Offline package integrity and smoke test (does not use patient images)."""
+"""Offline package integrity and smoke test."""
 
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ def main() -> None:
 
     pipeline = TKRSegmentationPipeline(device="cpu")
     # Deterministic synthetic pixels verify loading, preprocessing and forward
-    # execution only. They are not used as a clinical or accuracy test.
+    # execution only. They are not used as an accuracy test.
     gradient = np.linspace(0, 255, 256, dtype=np.uint8)
     synthetic = np.dstack([
         np.tile(gradient, (256, 1)),

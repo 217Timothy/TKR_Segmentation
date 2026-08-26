@@ -1,34 +1,14 @@
 {
-  "package_name": "tkr_inference_package",
-  "package_version": "2.0.0",
+  "package_name": "tkr_segmentation_inference",
+  "package_version": "2.1.0",
   "created_date": "2026-08-26",
   "weight_file": "tkr_inference/weights/tkr_seg_validity_gate_b3_256.pt",
   "weight_sha256": "08b8080f7dd14f3a316d6de3e94305d654a63b58bf098abf6a88db3cb06c8572",
-  "source_checkpoint": "outputs/checkpoints/tkr-validity-hard-mining-v1/exp1_bidirectional_hard_sampling_b3_256_seed42/deployment_tkr_acceptance_100_val349_groups54.pt",
-  "source_checkpoint_sha256": "a922f2337265803d0f6ddfc643850d697bb6527f7fea0ff27981ab7b30903893",
   "checkpoint_epoch": 3,
   "architecture": "EfficientNet-B3 + SCSE U-Net + direct validity/OOD head",
   "image_size": 256,
   "mask_threshold": 0.5,
   "ood_threshold": 0.38371683454513555,
   "ood_score_direction": "higher_is_more_ood",
-  "gate_rule": "accept iff ood_score < ood_threshold",
-  "threshold_calibration": {
-    "positive_images": 349,
-    "positive_unique_groups": 54,
-    "target_tkr_acceptance": 1.0,
-    "ood_images_used": 0,
-    "test_data_used": false
-  },
-  "segmentation_validation": {
-    "images": 32,
-    "unique_groups": 8,
-    "dice": 0.9676289745,
-    "iou": 0.9374152962,
-    "recall": 0.9694450814,
-    "precision": 0.9664181005
-  },
-  "intended_use": "research-only TKR input validity screening, wound segmentation, and ROI extraction before classification",
-  "clinical_use": false,
-  "github_includes_weight": false
+  "gate_rule": "accept iff ood_score < ood_threshold"
 }

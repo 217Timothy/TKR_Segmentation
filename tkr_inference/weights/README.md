@@ -1,17 +1,19 @@
-# Model weight
+# 模型放置位置
 
-The GitHub repository intentionally does not contain the model weight.
-
-Place the privately supplied file here with this exact name:
+請將模型放在本資料夾，檔名必須是：
 
 ```text
 tkr_seg_validity_gate_b3_256.pt
 ```
 
-Expected SHA-256:
+完整相對路徑：
 
 ```text
-08b8080f7dd14f3a316d6de3e94305d654a63b58bf098abf6a88db3cb06c8572
+tkr_inference/weights/tkr_seg_validity_gate_b3_256.pt
 ```
 
-Then run `./run.sh verify`. Do not commit the weight, patient images, patient mapping, or inference outputs to Git.
+放好後回到專案根目錄執行：
+
+```bash
+./run.sh verify
+```

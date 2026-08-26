@@ -2,7 +2,7 @@
 
 The checkpoint contains one shared EfficientNet-B3 encoder, a U-Net
 segmentation decoder, and an image-level valid-TKR head.  The calibrated gate
-is evaluated before a wound ROI is exposed to downstream code.
+is evaluated before the final segmentation mask is returned.
 """
 
 from __future__ import annotations
@@ -106,14 +106,12 @@ class InferenceResult:
     """One image's outputs. Arrays use the original input resolution."""
 
     accepted: bool
-    should_classify: bool
     decision: str
     ood_score: float
     valid_tkr_probability: float
     ood_threshold: float
     mask: np.ndarray
     bbox_xyxy: tuple[int, int, int, int] | None
-    roi_bgr: np.ndarray | None
     masked_bgr: np.ndarray
     overlay_bgr: np.ndarray
     raw_mask_non_empty: bool
@@ -124,7 +122,6 @@ class InferenceResult:
         """Return the JSON-safe portion of the result."""
         return {
             "accepted": self.accepted,
-            "should_classify": self.should_classify,
             "decision": self.decision,
             "ood_score": self.ood_score,
             "valid_tkr_probability": self.valid_tkr_probability,
@@ -215,32 +212,28 @@ def _postprocess(mask: np.ndarray, *, min_area: int = 50) -> np.ndarray:
     return (clean > 0).astype(np.uint8)
 
 
-def _bbox_and_roi(image_bgr: np.ndarray, mask: np.ndarray,
-                  padding_pixels: int
-                  ) -> tuple[tuple[int, int, int, int] | None, np.ndarray | None]:
+def _mask_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
     ys, xs = np.where(mask > 0)
     if not xs.size:
-        return None, None
-    height, width = mask.shape
-    x1 = max(0, int(xs.min()) - padding_pixels)
-    y1 = max(0, int(ys.min()) - padding_pixels)
-    x2 = min(width, int(xs.max()) + 1 + padding_pixels)
-    y2 = min(height, int(ys.max()) + 1 + padding_pixels)
-    return (x1, y1, x2, y2), image_bgr[y1:y2, x1:x2].copy()
+        return None
+    return (
+        int(xs.min()),
+        int(ys.min()),
+        int(xs.max()) + 1,
+        int(ys.max()) + 1,
+    )
 
 
 class TKRSegmentationPipeline:
     """Load once, then run the gated segmentation pipeline on many images."""
 
     def __init__(self, checkpoint: str | Path | None = None, *,
-                 device: str = "auto", mask_threshold: float = 0.5,
-                 roi_padding_pixels: int = 40) -> None:
+                 device: str = "auto", mask_threshold: float = 0.5) -> None:
         self.checkpoint_path = Path(checkpoint) if checkpoint else _DEFAULT_WEIGHT
         if not self.checkpoint_path.is_file():
             raise FileNotFoundError(self.checkpoint_path)
         self.device = _pick_device(device)
         self.mask_threshold = float(mask_threshold)
-        self.roi_padding_pixels = max(0, int(roi_padding_pixels))
 
         checkpoint_data = torch.load(
             self.checkpoint_path, map_location="cpu", weights_only=False
@@ -316,10 +309,7 @@ class TKRSegmentationPipeline:
             boxed_mask = np.zeros_like(raw_boxed_mask, dtype=np.uint8)
         mask = _restore_mask(boxed_mask, valid, original_shape)
         mask_non_empty = bool(mask.any())
-        bbox, roi = _bbox_and_roi(
-            image_bgr, mask, padding_pixels=self.roi_padding_pixels
-        )
-        should_classify = accepted and mask_non_empty
+        bbox = _mask_bbox(mask)
         if not accepted:
             decision = "REJECT_OOD"
         elif mask_non_empty:
@@ -337,14 +327,12 @@ class TKRSegmentationPipeline:
 
         return InferenceResult(
             accepted=accepted,
-            should_classify=should_classify,
             decision=decision,
             ood_score=ood_score,
             valid_tkr_probability=valid_probability,
             ood_threshold=self.ood_threshold,
             mask=mask,
             bbox_xyxy=bbox,
-            roi_bgr=roi,
             masked_bgr=masked,
             overlay_bgr=overlay,
             raw_mask_non_empty=raw_non_empty,

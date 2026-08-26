@@ -7,7 +7,7 @@ build/
 dist/
 *.egg-info/
 
-# Research assets must not be committed.
+# Local model and inference files.
 *.pt
 *.pth
 *.ckpt
@@ -16,4 +16,3 @@ inputs/
 output/
 outputs/
 predictions/
-patient_data/
