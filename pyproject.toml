@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tkr-segmentation-inference"
+version = "2.0.0"
+description = "Standalone TKR validity gate, wound segmentation, and ROI inference"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26,<3",
+  "opencv-python-headless>=4.8,<5",
+  "torch>=2.2,<3",
+  "torchvision>=0.17,<1",
+  "segmentation-models-pytorch>=0.5,<0.6",
+]
+
+[project.scripts]
+tkr-segment = "tkr_inference.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["tkr_inference*"]
+
+[tool.setuptools.package-data]
+tkr_inference = ["weights/*.pt", "weights/*.md"]

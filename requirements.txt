@@ -1,0 +1,5 @@
+numpy>=1.26,<3
+opencv-python-headless>=4.8,<5
+torch>=2.2,<3
+torchvision>=0.17,<1
+segmentation-models-pytorch>=0.5,<0.6

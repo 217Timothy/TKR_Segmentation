@@ -1,0 +1,19 @@
+.DS_Store
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+build/
+dist/
+*.egg-info/
+
+# Research assets must not be committed.
+*.pt
+*.pth
+*.ckpt
+input/
+inputs/
+output/
+outputs/
+predictions/
+patient_data/
