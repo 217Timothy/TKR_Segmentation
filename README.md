@@ -19,7 +19,7 @@ tkr_inference/weights/tkr_seg_validity_gate_b3_256.pt
 完整目錄應如下：
 
 ```text
-TKR_Semgmentation/
+TKR_Segmentation/
 ├── tkr_inference/
 │   ├── pipeline.py
 │   ├── cli.py
