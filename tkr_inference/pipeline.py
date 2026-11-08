@@ -11,6 +11,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import os
+os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
+import albumentations as A
+from .postprocess import postprocess_mask
+
 import cv2
 import numpy as np
 import segmentation_models_pytorch as smp
@@ -23,7 +28,7 @@ _STD = np.asarray((0.229, 0.224, 0.225), dtype=np.float32)
 _DEFAULT_WEIGHT = (
     Path(__file__).resolve().parent
     / "weights"
-    / "tkr_seg_validity_gate_b3_256.pt"
+    / "tkr_seg_validity_gate_b3_512_20261109.pt"
 )
 
 
@@ -194,24 +199,6 @@ def _restore_mask(mask: np.ndarray, valid_mask: np.ndarray,
     )
 
 
-def _postprocess(mask: np.ndarray, *, min_area: int = 50) -> np.ndarray:
-    work = np.where(mask > 0, 255, 0).astype(np.uint8)
-    work = cv2.GaussianBlur(work, (7, 7), 0.0)
-    _, work = cv2.threshold(work, 127, 255, cv2.THRESH_BINARY)
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
-    work = cv2.morphologyEx(work, cv2.MORPH_CLOSE, kernel)
-    contours, _ = cv2.findContours(
-        work, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-    )
-    clean = np.zeros_like(work)
-    if contours:
-        largest = max(contours, key=cv2.contourArea)
-        if cv2.contourArea(largest) >= min_area:
-            cv2.drawContours(clean, [largest], -1, 255, thickness=cv2.FILLED)
-    clean = cv2.morphologyEx(clean, cv2.MORPH_CLOSE, kernel)
-    return (clean > 0).astype(np.uint8)
-
-
 def _mask_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
     ys, xs = np.where(mask > 0)
     if not xs.size:
@@ -259,7 +246,9 @@ class TKRSegmentationPipeline:
             raise ValueError("refusing a checkpoint whose threshold used test data")
 
         self.ood_threshold = float(calibration["threshold"])
-        self.image_size = 256
+        self.image_size = int(checkpoint_data["image_size"])
+        self.postprocess = checkpoint_data["inference_postprocess"]
+        self.normalize = A.Normalize(mean=tuple(_MEAN), std=tuple(_STD))
         self.checkpoint_epoch = int(checkpoint_data.get("epoch", -1))
         self.model = EfficientUnetValidity(
             encoder_name=cfg["encoder_name"],
@@ -288,7 +277,7 @@ class TKRSegmentationPipeline:
         original_shape = image_bgr.shape[:2]
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
         boxed, valid = _letterbox_with_content_mask(image_rgb, self.image_size)
-        normalized = (boxed.astype(np.float32) / 255.0 - _MEAN) / _STD
+        normalized = self.normalize(image=boxed)["image"]
         tensor = torch.from_numpy(normalized.transpose(2, 0, 1)).unsqueeze(0)
         valid_tensor = torch.from_numpy(valid.astype(np.float32))[None, None]
         tensor = tensor.to(self.device)
@@ -304,7 +293,7 @@ class TKRSegmentationPipeline:
         raw_non_empty = bool(raw_boxed_mask.any())
 
         if accepted:
-            boxed_mask = _postprocess(raw_boxed_mask, min_area=50)
+            boxed_mask = postprocess_mask(raw_boxed_mask, **self.postprocess)
         else:
             boxed_mask = np.zeros_like(raw_boxed_mask, dtype=np.uint8)
         mask = _restore_mask(boxed_mask, valid, original_shape)

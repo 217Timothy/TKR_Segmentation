@@ -34,6 +34,13 @@ def main() -> None:
     if abs(checkpoint_threshold - float(manifest["ood_threshold"])) > 1e-12:
         raise SystemExit("checkpoint OOD threshold does not match manifest")
 
+    if checkpoint["image_size"] != manifest["image_size"]:
+        raise SystemExit("checkpoint image size does not match manifest")
+    if checkpoint["inference_postprocess"] != manifest["inference_postprocess"]:
+        raise SystemExit("checkpoint postprocessing does not match manifest")
+    if __version__ != manifest["package_version"]:
+        raise SystemExit("package version does not match manifest")
+    torch.set_num_threads(4)
     pipeline = TKRSegmentationPipeline(device="cpu")
     # Deterministic synthetic pixels verify loading, preprocessing and forward
     # execution only. They are not used as an accuracy test.

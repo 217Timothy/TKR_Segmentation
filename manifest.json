@@ -1,14 +1,17 @@
 {
-  "package_name": "tkr_segmentation_inference",
-  "package_version": "2.1.1",
-  "created_date": "2026-08-26",
-  "weight_file": "tkr_inference/weights/tkr_seg_validity_gate_b3_256.pt",
-  "weight_sha256": "08b8080f7dd14f3a316d6de3e94305d654a63b58bf098abf6a88db3cb06c8572",
-  "checkpoint_epoch": 3,
-  "architecture": "EfficientNet-B3 + SCSE U-Net + direct validity/OOD head",
-  "image_size": 256,
-  "mask_threshold": 0.5,
-  "ood_threshold": 0.38371683454513555,
-  "ood_score_direction": "higher_is_more_ood",
-  "gate_rule": "accept iff ood_score < ood_threshold"
+  "package_version": "2.3.0",
+  "model_id": "tkr-legacy512-targeted-repair-20261109-v4-epoch1",
+  "weight_file": "tkr_inference/weights/tkr_seg_validity_gate_b3_512_20261109.pt",
+  "weight_sha256": "28053e140de937e371b82647c6cf7213aa3cd5bd0cd852913d17c14d09bf8e1d",
+  "checkpoint_epoch": 1,
+  "ood_threshold": 0.2077719569206238,
+  "image_size": 512,
+  "inference_postprocess": {
+    "blur_kernel": 9,
+    "blur_sigma": 0.0,
+    "closing_kernel": 9,
+    "open_kernel": 5,
+    "min_area": 200,
+    "keep_largest": true
+  }
 }
