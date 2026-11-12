@@ -35,6 +35,10 @@ def main() -> None:
     parser.add_argument("--input", type=Path, required=True,
                         help="an image or a directory (searched recursively)")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--model", choices=("validity", "legacy"), default="validity",
+                        help="validity: current gated model; legacy: June pure segmentation")
+    parser.add_argument("--profile", choices=("historical-roi", "letterbox"), default=None,
+                        help="validity default: historical-roi; pure legacy default: letterbox")
     parser.add_argument("--checkpoint", type=Path, default=None)
     parser.add_argument("--device", default="auto",
                         help="auto, cpu, cuda, cuda:0, or mps")
@@ -50,9 +54,14 @@ def main() -> None:
     if not paths:
         raise FileNotFoundError(f"no supported images under {args.input}")
 
-    pipeline = TKRSegmentationPipeline(
+    pipeline_class = TKRSegmentationPipeline
+    if args.model == "legacy":
+        from .legacy import LegacySegmentationPipeline
+        pipeline_class = LegacySegmentationPipeline
+    pipeline = pipeline_class(
         checkpoint=args.checkpoint,
         device=args.device,
+        **({"profile": args.profile} if args.profile is not None else {}),
     )
     args.output.mkdir(parents=True, exist_ok=False)
     summary = []
@@ -60,26 +69,40 @@ def main() -> None:
         result = pipeline.predict(path)
         image_dir = args.output / _output_name(path)
         image_dir.mkdir()
-        cv2.imwrite(str(image_dir / "mask.png"), result.mask * 255)
-        cv2.imwrite(str(image_dir / "overlay.png"), result.overlay_bgr)
-        cv2.imwrite(str(image_dir / "masked.png"), result.masked_bgr)
-        record = {"input": str(path), **result.metadata()}
+        for name, pixels in (("mask.png", result.mask * 255), ("overlay.png", result.overlay_bgr),
+                             ("masked.png", result.masked_bgr)):
+            if not cv2.imwrite(str(image_dir / name), pixels):
+                raise OSError(f"failed to save {image_dir / name}")
+        if result.roi_bgr is not None:
+            if not cv2.imwrite(str(image_dir / "roi.jpg"), result.roi_bgr,
+                               [cv2.IMWRITE_JPEG_QUALITY, 95]):
+                raise OSError(f"failed to save {image_dir / 'roi.jpg'}")
+        record = {"input": str(path), **result.metadata(),
+                  "roi_file": "roi.jpg" if result.roi_bgr is not None else None}
         (image_dir / "result.json").write_text(
             json.dumps(record, indent=2, ensure_ascii=False), encoding="utf-8"
         )
         summary.append(record)
-        print(
-            f"[{index}/{len(paths)}] {path.name}: {result.decision} "
-            f"ood={result.ood_score:.6f} threshold={result.ood_threshold:.6f}"
-        )
+        gate_text = (f" ood={result.ood_score:.6f} threshold={result.ood_threshold:.6f}"
+                     if pipeline.gate_enabled else " (no validity gate)")
+        print(f"[{index}/{len(paths)}] {path.name}: {result.decision}{gate_text}", flush=True)
 
-    accepted = sum(item["accepted"] for item in summary)
+    accepted = sum(item["accepted"] is True for item in summary) if pipeline.gate_enabled else None
     mask_non_empty = sum(item["mask_non_empty"] for item in summary)
     report = {
         "input": str(args.input),
         "images": len(summary),
         "accepted": accepted,
-        "rejected": len(summary) - accepted,
+        "rejected": len(summary) - accepted if pipeline.gate_enabled else None,
+        "model_variant": args.model,
+        "processing": pipeline.processing_config(),
+        "roi_images": sum(item["roi_available"] for item in summary),
+        "validity_gate_enabled": pipeline.gate_enabled,
+        "checkpoint_path": str(pipeline.checkpoint_path.resolve()),
+        "checkpoint_sha256": hashlib.sha256(pipeline.checkpoint_path.read_bytes()).hexdigest(),
+        "image_size": pipeline.image_size,
+        "mask_threshold": pipeline.mask_threshold,
+        "postprocess": pipeline.postprocess,
         "mask_non_empty": mask_non_empty,
         "device": str(pipeline.device),
         "checkpoint_epoch": pipeline.checkpoint_epoch,

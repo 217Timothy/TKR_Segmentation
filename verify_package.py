@@ -36,12 +36,18 @@ def main() -> None:
 
     if checkpoint["image_size"] != manifest["image_size"]:
         raise SystemExit("checkpoint image size does not match manifest")
-    if checkpoint["inference_postprocess"] != manifest["inference_postprocess"]:
+    if checkpoint["inference_postprocess"] != manifest["checkpoint_inference_postprocess"]:
         raise SystemExit("checkpoint postprocessing does not match manifest")
     if __version__ != manifest["package_version"]:
         raise SystemExit("package version does not match manifest")
     torch.set_num_threads(4)
     pipeline = TKRSegmentationPipeline(device="cpu")
+    processing = pipeline.processing_config()
+    for key in ("gate_preprocessing", "segmentation_preprocessing", "roi_padding", "roi_jpeg_quality"):
+        if processing[key] != manifest[key]:
+            raise SystemExit(f"active profile mismatch: {key}")
+    if pipeline.profile != manifest["default_profile"] or pipeline.postprocess != manifest["inference_postprocess"]:
+        raise SystemExit("default profile or active postprocessing does not match manifest")
     # Deterministic synthetic pixels verify loading, preprocessing and forward
     # execution only. They are not used as an accuracy test.
     gradient = np.linspace(0, 255, 256, dtype=np.uint8)

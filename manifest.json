@@ -1,5 +1,5 @@
 {
-  "package_version": "2.3.0",
+  "package_version": "2.4.0",
   "model_id": "tkr-legacy512-targeted-repair-20261109-v4-epoch1",
   "weight_file": "tkr_inference/weights/tkr_seg_validity_gate_b3_512_20261109.pt",
   "weight_sha256": "28053e140de937e371b82647c6cf7213aa3cd5bd0cd852913d17c14d09bf8e1d",
@@ -7,11 +7,24 @@
   "ood_threshold": 0.2077719569206238,
   "image_size": 512,
   "inference_postprocess": {
+    "blur_kernel": 7,
+    "blur_sigma": 0.0,
+    "closing_kernel": 7,
+    "open_kernel": 0,
+    "min_area": 200,
+    "keep_largest": true
+  },
+  "checkpoint_inference_postprocess": {
     "blur_kernel": 9,
     "blur_sigma": 0.0,
     "closing_kernel": 9,
     "open_kernel": 5,
     "min_area": 200,
     "keep_largest": true
-  }
+  },
+  "default_profile": "historical-roi",
+  "gate_preprocessing": "letterbox_content_mask",
+  "segmentation_preprocessing": "stretch",
+  "roi_padding": 40,
+  "roi_jpeg_quality": 95
 }

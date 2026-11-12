@@ -21,7 +21,7 @@ case "${1:-help}" in
   help|-h|--help)
     echo "Usage:"
     echo "  ./run.sh verify"
-    echo "  ./run.sh infer --input IMAGE_OR_DIR --output NEW_OUTPUT_DIR [--device auto]"
+    echo "  ./run.sh infer --input IMAGE_OR_DIR --output NEW_OUTPUT_DIR [--model validity|legacy] [--profile historical-roi|letterbox] [--device auto]"
     ;;
   *)
     echo "Unknown command: $1" >&2

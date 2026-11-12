@@ -96,6 +96,20 @@ class EfficientUnetValidity(nn.Module):
             dropout=validity_dropout,
         )
 
+    def forward_gate(self, image: torch.Tensor,
+                     valid_mask: torch.Tensor) -> dict[str, torch.Tensor]:
+        """Evaluate the calibrated gate on its original letterboxed input."""
+        features = self.model.encoder(image)
+        features[-1] = self.bottleneck_dropout(features[-1])
+        return self.ood_head(features[-1], valid_mask=valid_mask)
+
+    def forward_segmentation(self, image: torch.Tensor) -> torch.Tensor:
+        """Use the same checkpoint's segmentation branch without running its gate."""
+        features = self.model.encoder(image)
+        features[-1] = self.bottleneck_dropout(features[-1])
+        decoded = self.model.decoder(features)
+        return self.model.segmentation_head(decoded)
+
     def forward(self, image: torch.Tensor,
                 valid_mask: torch.Tensor) -> dict[str, torch.Tensor]:
         features = self.model.encoder(image)
@@ -110,18 +124,22 @@ class EfficientUnetValidity(nn.Module):
 class InferenceResult:
     """One image's outputs. Arrays use the original input resolution."""
 
-    accepted: bool
+    accepted: bool | None
     decision: str
-    ood_score: float
-    valid_tkr_probability: float
-    ood_threshold: float
+    ood_score: float | None
+    valid_tkr_probability: float | None
+    ood_threshold: float | None
     mask: np.ndarray
     bbox_xyxy: tuple[int, int, int, int] | None
     masked_bgr: np.ndarray
     overlay_bgr: np.ndarray
-    raw_mask_non_empty: bool
+    raw_mask_non_empty: bool | None
     mask_non_empty: bool
     image_shape_hw: tuple[int, int]
+    profile: str = "letterbox"
+    segmentation_executed: bool = True
+    roi_bgr: np.ndarray | None = None
+    roi_bbox_xyxy: tuple[int, int, int, int] | None = None
 
     def metadata(self) -> dict[str, Any]:
         """Return the JSON-safe portion of the result."""
@@ -131,11 +149,17 @@ class InferenceResult:
             "ood_score": self.ood_score,
             "valid_tkr_probability": self.valid_tkr_probability,
             "ood_threshold": self.ood_threshold,
-            "score_direction": "higher_is_more_ood",
+            "score_direction": "higher_is_more_ood" if self.ood_score is not None else None,
+            "validity_gate_enabled": self.ood_score is not None,
             "mask_non_empty": self.mask_non_empty,
             "raw_mask_non_empty": self.raw_mask_non_empty,
             "bbox_xyxy": list(self.bbox_xyxy) if self.bbox_xyxy else None,
             "image_shape_hw": list(self.image_shape_hw),
+            "profile": self.profile,
+            "segmentation_executed": self.segmentation_executed,
+            "roi_available": self.roi_bgr is not None,
+            "roi_bbox_xyxy": list(self.roi_bbox_xyxy) if self.roi_bbox_xyxy else None,
+            "roi_shape_hw": list(self.roi_bgr.shape[:2]) if self.roi_bgr is not None else None,
         }
 
 
@@ -214,8 +238,11 @@ def _mask_bbox(mask: np.ndarray) -> tuple[int, int, int, int] | None:
 class TKRSegmentationPipeline:
     """Load once, then run the gated segmentation pipeline on many images."""
 
+    gate_enabled = True
+
     def __init__(self, checkpoint: str | Path | None = None, *,
-                 device: str = "auto", mask_threshold: float = 0.5) -> None:
+                 device: str = "auto", mask_threshold: float = 0.5,
+                 profile: str = "historical-roi") -> None:
         self.checkpoint_path = Path(checkpoint) if checkpoint else _DEFAULT_WEIGHT
         if not self.checkpoint_path.is_file():
             raise FileNotFoundError(self.checkpoint_path)
@@ -247,7 +274,8 @@ class TKRSegmentationPipeline:
 
         self.ood_threshold = float(calibration["threshold"])
         self.image_size = int(checkpoint_data["image_size"])
-        self.postprocess = checkpoint_data["inference_postprocess"]
+        self.checkpoint_postprocess = dict(checkpoint_data["inference_postprocess"])
+        self._configure_profile(profile)
         self.normalize = A.Normalize(mean=tuple(_MEAN), std=tuple(_STD))
         self.checkpoint_epoch = int(checkpoint_data.get("epoch", -1))
         self.model = EfficientUnetValidity(
@@ -258,6 +286,34 @@ class TKRSegmentationPipeline:
         )
         self.model.load_state_dict(checkpoint_data["state_dict"], strict=True)
         self.model.to(self.device).eval()
+
+    def _configure_profile(self, profile: str) -> None:
+        if profile not in ("historical-roi", "letterbox"):
+            raise ValueError(f"unsupported inference profile: {profile}")
+        if profile == "historical-roi" and self.image_size != 512:
+            raise ValueError("historical-roi requires a 512px checkpoint")
+        self.profile = profile
+        self.roi_padding = 40 if profile == "historical-roi" else None
+        self.postprocess = (
+            dict(blur_kernel=7, blur_sigma=0.0, closing_kernel=7,
+                 open_kernel=0, min_area=200, keep_largest=True)
+            if profile == "historical-roi" else dict(self.checkpoint_postprocess)
+        )
+
+    def processing_config(self) -> dict[str, Any]:
+        return {
+            "profile": self.profile,
+            "gate_preprocessing": "letterbox_content_mask" if self.gate_enabled else None,
+            "segmentation_preprocessing": (
+                "stretch" if self.profile == "historical-roi" else "letterbox_content_mask"
+            ),
+            "image_size": self.image_size,
+            "mask_threshold": self.mask_threshold,
+            "postprocess": self.postprocess,
+            "checkpoint_postprocess": self.checkpoint_postprocess,
+            "roi_padding": self.roi_padding,
+            "roi_jpeg_quality": 95 if self.profile == "historical-roi" else None,
+        }
 
     @torch.inference_mode()
     def predict(self, image: str | Path | np.ndarray) -> InferenceResult:
@@ -283,23 +339,51 @@ class TKRSegmentationPipeline:
         tensor = tensor.to(self.device)
         valid_tensor = valid_tensor.to(self.device)
 
-        output = self.model(tensor, valid_tensor)
-        ood_score = float(output["ood_score_mean"][0].item())
-        valid_probability = float(output["valid_tkr_probability"][0].item())
-        accepted = ood_score < self.ood_threshold
-        raw_boxed_mask = (
-            torch.sigmoid(output["seg_logits"])[0, 0] > self.mask_threshold
-        ).to(torch.uint8).cpu().numpy()
-        raw_non_empty = bool(raw_boxed_mask.any())
-
-        if accepted:
-            boxed_mask = postprocess_mask(raw_boxed_mask, **self.postprocess)
+        # Keep the previous single-pass path intact as an explicit option.
+        if self.profile == "letterbox":
+            output = self.model(tensor, valid_tensor)
+        elif self.gate_enabled:
+            output = self.model.forward_gate(tensor, valid_tensor)
         else:
-            boxed_mask = np.zeros_like(raw_boxed_mask, dtype=np.uint8)
-        mask = _restore_mask(boxed_mask, valid, original_shape)
+            output = {}
+
+        if self.gate_enabled:
+            ood_score = float(output["ood_score_mean"][0].item())
+            valid_probability = float(output["valid_tkr_probability"][0].item())
+            accepted = ood_score < self.ood_threshold
+        else:
+            ood_score = valid_probability = accepted = None
+
+        segmentation_executed = self.profile == "letterbox" or accepted is not False
+        raw_non_empty = None
+        if segmentation_executed:
+            if self.profile == "historical-roi":
+                stretched = cv2.resize(
+                    image_rgb, (self.image_size, self.image_size), interpolation=cv2.INTER_LINEAR
+                )
+                seg_normalized = self.normalize(image=stretched)["image"]
+                seg_tensor = torch.from_numpy(seg_normalized.transpose(2, 0, 1))[None].to(self.device)
+                logits = self.model.forward_segmentation(seg_tensor)
+            else:
+                logits = output["seg_logits"]
+            raw_mask = (torch.sigmoid(logits)[0, 0] > self.mask_threshold).to(torch.uint8).cpu().numpy()
+            raw_non_empty = bool(raw_mask.any())
+            processed = (postprocess_mask(raw_mask, **self.postprocess)
+                         if accepted is not False else np.zeros_like(raw_mask))
+            if self.profile == "historical-roi":
+                mask = cv2.resize(processed, (original_shape[1], original_shape[0]),
+                                  interpolation=cv2.INTER_NEAREST)
+            else:
+                mask = _restore_mask(processed, valid, original_shape)
+        else:
+            # A rejection is terminal: no segmentation pass and no ROI fallback.
+            mask = np.zeros(original_shape, dtype=np.uint8)
         mask_non_empty = bool(mask.any())
         bbox = _mask_bbox(mask)
-        if not accepted:
+        if not self.gate_enabled:
+            decision = ("SEGMENTATION_ONLY_WOUND_FOUND" if mask_non_empty
+                        else "SEGMENTATION_ONLY_NO_WOUND_MASK")
+        elif not accepted:
             decision = "REJECT_OOD"
         elif mask_non_empty:
             decision = "ACCEPT_TKR_WOUND_FOUND"
@@ -314,6 +398,16 @@ class TKRSegmentationPipeline:
             blended = cv2.addWeighted(image_bgr, 0.55, red, 0.45, 0)
             overlay[mask.astype(bool)] = blended[mask.astype(bool)]
 
+        roi = None
+        roi_bbox = None
+        if self.profile == "historical-roi" and accepted is not False and bbox is not None:
+            x0, y0, x1, y1 = bbox
+            padding = self.roi_padding
+            roi_bbox = (max(0, x0-padding), max(0, y0-padding),
+                        min(original_shape[1], x1+padding), min(original_shape[0], y1+padding))
+            x0, y0, x1, y1 = roi_bbox
+            roi = masked[y0:y1, x0:x1].copy()
+
         return InferenceResult(
             accepted=accepted,
             decision=decision,
@@ -327,4 +421,8 @@ class TKRSegmentationPipeline:
             raw_mask_non_empty=raw_non_empty,
             mask_non_empty=mask_non_empty,
             image_shape_hw=original_shape,
+            profile=self.profile,
+            segmentation_executed=segmentation_executed,
+            roi_bgr=roi,
+            roi_bbox_xyxy=roi_bbox,
         )

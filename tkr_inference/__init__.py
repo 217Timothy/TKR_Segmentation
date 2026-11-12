@@ -2,6 +2,6 @@
 
 from .pipeline import InferenceResult, TKRSegmentationPipeline
 
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 __all__ = ["InferenceResult", "TKRSegmentationPipeline", "__version__"]
